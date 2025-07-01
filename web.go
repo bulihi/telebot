@@ -21,6 +21,16 @@ type WebServer struct {
 func NewWebServer(config *Config, db *Database, reloadChan chan struct{}) *WebServer {
 	// 使用配置的密码作为session密钥
 	store := sessions.NewCookieStore([]byte(config.Server.AdminPassword))
+
+	// 配置 cookie
+	store.Options = &sessions.Options{
+		Path:     "/",
+		MaxAge:   86400 * 7, // 7天
+		HttpOnly: true,
+		Secure:   false, // 如果使用HTTPS，设置为true
+		SameSite: http.SameSiteLaxMode,
+	}
+
 	return &WebServer{
 		config:     config,
 		db:         db,
@@ -62,7 +72,12 @@ func (ws *WebServer) Start() error {
 
 func (ws *WebServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		session, _ := ws.store.Get(r, "session-name")
+		session, err := ws.store.Get(r, "admin-session")
+		if err != nil {
+			http.Error(w, "Session错误", http.StatusInternalServerError)
+			return
+		}
+
 		if auth, ok := session.Values["authenticated"].(bool); !ok || !auth {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
@@ -72,15 +87,30 @@ func (ws *WebServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (ws *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
+	session, err := ws.store.Get(r, "admin-session")
+	if err != nil {
+		http.Error(w, "Session错误", http.StatusInternalServerError)
+		return
+	}
+
 	if r.Method == "POST" {
 		password := r.FormValue("password")
 		if password == ws.config.Server.AdminPassword {
-			session, _ := ws.store.Get(r, "session-name")
 			session.Values["authenticated"] = true
-			session.Save(r, w)
+			err = session.Save(r, w)
+			if err != nil {
+				http.Error(w, "保存Session失败", http.StatusInternalServerError)
+				return
+			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+	}
+
+	// 如果已经登录，直接跳转到首页
+	if auth, ok := session.Values["authenticated"].(bool); ok && auth {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
 
 	tmpl := `<!DOCTYPE html>
@@ -119,6 +149,11 @@ func (ws *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
         }
         .btn:hover { background: #0056b3; }
         h1 { text-align: center; color: #333; }
+        .error-message {
+            color: #dc3545;
+            margin-bottom: 15px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -140,9 +175,20 @@ func (ws *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ws *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
-	session, _ := ws.store.Get(r, "session-name")
+	session, err := ws.store.Get(r, "admin-session")
+	if err != nil {
+		http.Error(w, "Session错误", http.StatusInternalServerError)
+		return
+	}
+
 	session.Values["authenticated"] = false
-	session.Save(r, w)
+	session.Options.MaxAge = -1 // 使cookie立即过期
+	err = session.Save(r, w)
+	if err != nil {
+		http.Error(w, "保存Session失败", http.StatusInternalServerError)
+		return
+	}
+
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
