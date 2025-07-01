@@ -38,6 +38,11 @@ func (f *MessageFilter) CheckMessage(messageText string) *FilterResult {
 		return result
 	}
 
+	// 检查用户名提及
+	if result := f.checkUsernames(messageText); result.IsViolation {
+		return result
+	}
+
 	return &FilterResult{IsViolation: false}
 }
 
@@ -82,54 +87,66 @@ func (f *MessageFilter) checkTextMessage(text string) *FilterResult {
 }
 
 func (f *MessageFilter) checkLinks(text string) *FilterResult {
-	// 检查HTTP/HTTPS链接
-	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
-	urls := urlRegex.FindAllString(text, -1)
+	// 匹配 t.me 链接
+	tmeRegex := regexp.MustCompile(`(?i)t\.me/[a-zA-Z0-9_]+`)
+	matches := tmeRegex.FindAllString(text, -1)
 
-	for _, urlStr := range urls {
+	for _, match := range matches {
 		for _, keyword := range f.keywords {
-			keywordLower := strings.ToLower(keyword.Keyword)
-			urlLower := strings.ToLower(urlStr)
+			if strings.Contains(strings.ToLower(match), strings.ToLower(keyword.Keyword)) {
+				return &FilterResult{
+					IsViolation: true,
+					Keyword:     keyword.Keyword,
+					Action:      keyword.Action,
+					MatchType:   "link",
+				}
+			}
+		}
+	}
 
-			// 解析URL
-			if parsedURL, err := url.Parse(urlStr); err == nil {
-				domainLower := strings.ToLower(parsedURL.Host)
-				pathLower := strings.ToLower(parsedURL.Path)
+	// 匹配其他链接
+	urlRegex := regexp.MustCompile(`https?://[^\s]+`)
+	matches = urlRegex.FindAllString(text, -1)
 
-				switch keyword.MatchType {
-				case "exact":
-					if f.exactMatch(urlLower, keywordLower) ||
-						f.exactMatch(domainLower, keywordLower) ||
-						f.exactMatch(pathLower, keywordLower) {
-						return &FilterResult{
-							IsViolation: true,
-							Keyword:     keyword.Keyword,
-							Action:      keyword.Action,
-							MatchType:   keyword.MatchType,
-						}
-					}
-				case "fuzzy":
-					if f.fuzzyMatch(urlLower, keywordLower) ||
-						f.fuzzyMatch(domainLower, keywordLower) ||
-						f.fuzzyMatch(pathLower, keywordLower) {
-						return &FilterResult{
-							IsViolation: true,
-							Keyword:     keyword.Keyword,
-							Action:      keyword.Action,
-							MatchType:   keyword.MatchType,
-						}
-					}
-				case "regex":
-					if f.regexMatch(urlStr, keyword.Keyword) ||
-						f.regexMatch(parsedURL.Host, keyword.Keyword) ||
-						f.regexMatch(parsedURL.Path, keyword.Keyword) {
-						return &FilterResult{
-							IsViolation: true,
-							Keyword:     keyword.Keyword,
-							Action:      keyword.Action,
-							MatchType:   keyword.MatchType,
-						}
-					}
+	for _, match := range matches {
+		parsedURL, err := url.Parse(match)
+		if err != nil {
+			continue
+		}
+
+		for _, keyword := range f.keywords {
+			if strings.Contains(strings.ToLower(parsedURL.Host), strings.ToLower(keyword.Keyword)) ||
+				strings.Contains(strings.ToLower(parsedURL.Path), strings.ToLower(keyword.Keyword)) {
+				return &FilterResult{
+					IsViolation: true,
+					Keyword:     keyword.Keyword,
+					Action:      keyword.Action,
+					MatchType:   "link",
+				}
+			}
+		}
+	}
+
+	return &FilterResult{IsViolation: false}
+}
+
+func (f *MessageFilter) checkUsernames(text string) *FilterResult {
+	// 匹配 @ 用户名
+	usernameRegex := regexp.MustCompile(`@[a-zA-Z0-9_]+`)
+	matches := usernameRegex.FindAllString(text, -1)
+
+	for _, match := range matches {
+		username := strings.TrimPrefix(match, "@")
+		for _, keyword := range f.keywords {
+			// 如果关键词以 @ 开头，移除它进行比较
+			keywordUsername := strings.TrimPrefix(keyword.Keyword, "@")
+
+			if strings.EqualFold(username, keywordUsername) {
+				return &FilterResult{
+					IsViolation: true,
+					Keyword:     keyword.Keyword,
+					Action:      keyword.Action,
+					MatchType:   "username",
 				}
 			}
 		}
