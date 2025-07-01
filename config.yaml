@@ -1,13 +1,13 @@
 telegram:
-  bot_token: "7760737006:AAHv7-Q3OwXb1W_OhGRQvikHG9M6kqUOYSA"
-  admin_user_id: 7360542472
+  bot_token: "ssssssssss"
+  admin_user_id: 11111111
 
 database:
   path: "bot.db"
 
 server:
   port: ":8080"
-  admin_password: "Aa112233.."  # 管理页面密码
+  admin_password: "123456"  # 管理页面密码
 
 proxy:
   enabled: true              # 是否启用代理
