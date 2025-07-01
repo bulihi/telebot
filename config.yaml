@@ -1,0 +1,52 @@
+telegram:
+  bot_token: "7760737006:AAHv7-Q3OwXb1W_OhGRQvikHG9M6kqUOYSA"
+  admin_user_id: 7360542472
+
+database:
+  path: "bot.db"
+
+server:
+  port: ":8080"
+  admin_password: "Aa112233.."  # 管理页面密码
+
+proxy:
+  enabled: true              # 是否启用代理
+  url: "socks5://127.0.0.1:10809" # 代理地址，常见端口：7890, 1080, 8080
+  
+settings:
+  default_action: "mute"  # mute 或 kick
+  mute_duration: 3600     # 禁言时长（秒）
+  log_violations: true    # 是否记录违规日志 
+
+groups:
+  default_settings: # 默认群组设置
+    welcome_message: |
+      欢迎 {user} 来到 {group_name}
+      💵此群为美国项目官方群💵
+      本群防失联频道 https://t.me/us1788
+      进群请关注,防止失联
+
+      上压频道 https://t.me/shangya8888
+      为保证群中客户权益，同行卖号需联系群主上压，不要相信任何人的私聊，交易请走担保。
+
+      群官方客服：@HScc888
+
+      本群福利🧧：
+      不定期赠送
+      1 免费钓鱼源码
+      2 免费cvv 资料
+      3 免费ssn 资料
+      4 技术知识分享
+      5 项目思路
+      所有福利均会置顶,欢迎各位老板邀朋友入群 祝各位老板生意兴隆!
+
+      群规：
+      ⚠️除上押人员,其他人禁止出售类广告。
+      ⚠️未上押者需求类广告一天一次。
+      ⚠️禁止谈论与发布涉及中国的任何言论（含港澳）和业务发现一律拉黑！
+
+    verification:
+      enabled: true
+      question: "请回答：69*5=?"  # 默认验证问题
+      answer: "345"                # 默认答案
+      timeout: 300              # 验证超时时间（秒） 
