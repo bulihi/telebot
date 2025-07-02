@@ -55,6 +55,13 @@ type Message struct {
 	FilePath       string    `json:"file_path,omitempty"`
 }
 
+type Chat struct {
+	ChatID    int64     `json:"chat_id"`
+	Title     string    `json:"title"`
+	Type      string    `json:"type"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func NewDatabase(dbPath string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -505,4 +512,38 @@ func containsColumn(columns []string, column string) bool {
 
 func (d *Database) Close() error {
 	return d.db.Close()
+}
+
+// UpsertChat 更新或插入群组信息
+func (d *Database) UpsertChat(chat *Chat) error {
+	query := `INSERT INTO chats (chat_id, title, type) 
+			  VALUES (?, ?, ?) 
+			  ON CONFLICT(chat_id) DO UPDATE SET 
+			  title = excluded.title,
+			  type = excluded.type`
+
+	_, err := d.db.Exec(query, chat.ChatID, chat.Title, chat.Type)
+	return err
+}
+
+// GetChat 获取群组信息
+func (d *Database) GetChat(chatID int64) (*Chat, error) {
+	query := `SELECT chat_id, title, type, created_at FROM chats WHERE chat_id = ?`
+
+	var chat Chat
+	err := d.db.QueryRow(query, chatID).Scan(
+		&chat.ChatID,
+		&chat.Title,
+		&chat.Type,
+		&chat.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &chat, nil
 }
