@@ -66,6 +66,7 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/group-settings/{chatID}", ws.handleAPIGroupSettings).Methods("GET", "POST")
 	api.HandleFunc("/messages/mute/{userID:[0-9]+}", ws.handleAPIMuteUser).Methods("POST")
 	api.HandleFunc("/messages/kick/{userID:[0-9]+}", ws.handleAPIKickUser).Methods("POST")
+	api.HandleFunc("/violations", ws.handleAPIViolations).Methods("GET")
 
 	// 页面路由
 	r.HandleFunc("/", ws.authMiddleware(ws.handleDashboard))
@@ -301,6 +302,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             <a href="/">仪表板</a>
             <a href="/keywords">关键词管理</a>
             <a href="/violations">违规记录</a>
+            <a href="/messages">消息列表</a>
         </div>
         
         <div class="stats">
@@ -349,12 +351,6 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 func (ws *WebServer) handleKeywords(w http.ResponseWriter, r *http.Request) {
 	keywords, _ := ws.db.GetKeywords()
 
-	data := struct {
-		Keywords []Keyword
-	}{
-		Keywords: keywords,
-	}
-
 	tmpl := `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -387,6 +383,7 @@ func (ws *WebServer) handleKeywords(w http.ResponseWriter, r *http.Request) {
             <a href="/">仪表板</a>
             <a href="/keywords">关键词管理</a>
             <a href="/violations">违规记录</a>
+            <a href="/messages">消息列表</a>
         </div>
         
         <div class="add-form">
@@ -442,7 +439,7 @@ func (ws *WebServer) handleKeywords(w http.ResponseWriter, r *http.Request) {
             </tbody>
         </table>
     </div>
-    
+
     <script>
         document.getElementById('addKeywordForm').addEventListener('submit', function(e) {
             e.preventDefault();
@@ -492,18 +489,12 @@ func (ws *WebServer) handleKeywords(w http.ResponseWriter, r *http.Request) {
 </html>`
 
 	t := template.Must(template.New("keywords").Parse(tmpl))
-	t.Execute(w, data)
+	t.Execute(w, struct{ Keywords []Keyword }{Keywords: keywords})
 }
 
 // 违规记录页面
 func (ws *WebServer) handleViolations(w http.ResponseWriter, r *http.Request) {
 	violations, _ := ws.db.GetViolations(50)
-
-	data := struct {
-		Violations []Violation
-	}{
-		Violations: violations,
-	}
 
 	tmpl := `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -530,6 +521,7 @@ func (ws *WebServer) handleViolations(w http.ResponseWriter, r *http.Request) {
             <a href="/">仪表板</a>
             <a href="/keywords">关键词管理</a>
             <a href="/violations">违规记录</a>
+            <a href="/messages">消息列表</a>
         </div>
         
         <table>
@@ -565,7 +557,7 @@ func (ws *WebServer) handleViolations(w http.ResponseWriter, r *http.Request) {
 </html>`
 
 	t := template.Must(template.New("violations").Parse(tmpl))
-	t.Execute(w, data)
+	t.Execute(w, struct{ Violations []Violation }{Violations: violations})
 }
 
 func (ws *WebServer) handleGroupSettingsPage(w http.ResponseWriter, r *http.Request) {
@@ -821,4 +813,15 @@ func (ws *WebServer) handleAPIKickUser(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "用户已被踢出",
 	})
+}
+
+func (ws *WebServer) handleAPIViolations(w http.ResponseWriter, r *http.Request) {
+	violations, err := ws.db.GetViolations(50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(violations)
 }
