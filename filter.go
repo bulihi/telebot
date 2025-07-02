@@ -8,6 +8,8 @@ import (
 
 type MessageFilter struct {
 	keywords []Keyword
+	// 预编译的正则表达式
+	adPatterns []*regexp.Regexp
 }
 
 type FilterResult struct {
@@ -18,8 +20,35 @@ type FilterResult struct {
 }
 
 func NewMessageFilter(keywords []Keyword) *MessageFilter {
+	// 定义广告特征模式
+	patterns := []string{
+		`(?i)广[告告]待?[发發]`, // 广告待发/广告发
+		`(?i)精准.*?[群裙]`,   // 精准xxx群
+		`(?i)私信.*?[拉私]人`,  // 私信拉人
+		`(?i)强拉`,          // 强拉
+		`(?i)引流`,          // 引流
+		`(?i)代开会员`,        // 代开会员
+		`(?i)包效果`,         // 包效果
+		`(?i)双向`,          // 双向
+		`(?i)全行业`,         // 全行业
+		`(?i)实时查看`,        // 实时查看
+		`(?i)分类群`,         // 分类群
+		`(?i)活粉`,          // 活粉
+		`(?i)\d+万.*?[群裙]`, // 数字万xxx群
+		`(?i)代发`,          // 代发
+	}
+
+	// 预编译正则表达式
+	var compiledPatterns []*regexp.Regexp
+	for _, p := range patterns {
+		if r, err := regexp.Compile(p); err == nil {
+			compiledPatterns = append(compiledPatterns, r)
+		}
+	}
+
 	return &MessageFilter{
-		keywords: keywords,
+		keywords:   keywords,
+		adPatterns: compiledPatterns,
 	}
 }
 
@@ -28,17 +57,48 @@ func (f *MessageFilter) UpdateKeywords(keywords []Keyword) {
 }
 
 func (f *MessageFilter) CheckMessage(messageText string) *FilterResult {
-	// 检查文本消息
+	// 1. 检查是否包含广告特征
+	hasAdPattern := false
+	for _, pattern := range f.adPatterns {
+		if pattern.MatchString(messageText) {
+			hasAdPattern = true
+			break
+		}
+	}
+
+	// 2. 提取所有用户名
+	usernameRegex := regexp.MustCompile(`@[a-zA-Z0-9_]+`)
+	usernames := usernameRegex.FindAllString(messageText, -1)
+
+	// 3. 如果消息包含广告特征和被禁用的用户名，直接禁止
+	if hasAdPattern && len(usernames) > 0 {
+		for _, username := range usernames {
+			cleanUsername := strings.TrimPrefix(username, "@")
+			for _, keyword := range f.keywords {
+				cleanKeyword := strings.TrimPrefix(keyword.Keyword, "@")
+				if strings.EqualFold(cleanUsername, cleanKeyword) {
+					return &FilterResult{
+						IsViolation: true,
+						Keyword:     keyword.Keyword,
+						Action:      keyword.Action,
+						MatchType:   "ad_with_username",
+					}
+				}
+			}
+		}
+	}
+
+	// 4. 检查关键词匹配
 	if result := f.checkTextMessage(messageText); result.IsViolation {
 		return result
 	}
 
-	// 检查链接
+	// 5. 检查链接
 	if result := f.checkLinks(messageText); result.IsViolation {
 		return result
 	}
 
-	// 检查用户名提及
+	// 6. 检查用户名
 	if result := f.checkUsernames(messageText); result.IsViolation {
 		return result
 	}
