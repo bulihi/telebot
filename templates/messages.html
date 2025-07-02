@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消息列表 - Telegram Bot</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 20px; text-decoration: none; color: #007bff; }
+        .message-list { margin-top: 20px; }
+        .message-card {
+            background: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .user-info { font-weight: bold; }
+        .message-actions { display: flex; gap: 10px; }
+        .btn {
+            padding: 5px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            color: white;
+        }
+        .btn-warning { background-color: #ffc107; }
+        .btn-danger { background-color: #dc3545; }
+        .btn:hover { opacity: 0.9; }
+        .message-content { margin-top: 10px; }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 4px;
+            color: white;
+            display: none;
+            z-index: 1000;
+        }
+        .notification.success { background-color: #28a745; }
+        .notification.error { background-color: #dc3545; }
+        #loadingSpinner {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>消息列表</h1>
+        
+        <div class="nav">
+            <a href="/">仪表板</a>
+            <a href="/keywords">关键词管理</a>
+            <a href="/violations">违规记录</a>
+            <a href="/messages">消息列表</a>
+        </div>
+
+        <div id="loadingSpinner">
+            <div class="loading"></div>
+            <p>正在加载消息...</p>
+        </div>
+
+        <div id="messageList" class="message-list">
+            <!-- 消息将通过JavaScript动态加载 -->
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script>
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = 'notification ' + type;
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        function muteUser(userId, messageElement) {
+            fetch('/api/messages/mute/' + userId, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('用户已被禁言', 'success');
+                    messageElement.querySelector('.message-actions').innerHTML = '<span style="color: #dc3545;">已禁言</span>';
+                } else {
+                    showNotification('禁言失败: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('操作失败: ' + error, 'error');
+            });
+        }
+
+        function kickUser(userId, messageElement) {
+            fetch('/api/messages/kick/' + userId, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('用户已被踢出', 'success');
+                    messageElement.querySelector('.message-actions').innerHTML = '<span style="color: #dc3545;">已踢出</span>';
+                } else {
+                    showNotification('踢出失败: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('操作失败: ' + error, 'error');
+            });
+        }
+
+        function loadMessages() {
+            const spinner = document.getElementById('loadingSpinner');
+            const messageList = document.getElementById('messageList');
+            
+            spinner.style.display = 'block';
+            messageList.innerHTML = '';
+
+            // 从violations表获取最近的消息
+            fetch('/api/violations')
+            .then(response => response.json())
+            .then(data => {
+                spinner.style.display = 'none';
+                
+                data.forEach(msg => {
+                    const messageElement = document.createElement('div');
+                    messageElement.className = 'message-card';
+                    messageElement.innerHTML = `
+                        <div class="message-header">
+                            <div class="user-info">
+                                ${msg.username} (ID: ${msg.user_id})
+                            </div>
+                            <div class="message-actions">
+                                <button class="btn btn-warning" onclick="muteUser(${msg.user_id}, this.parentElement.parentElement.parentElement)">禁言用户</button>
+                                <button class="btn btn-danger" onclick="kickUser(${msg.user_id}, this.parentElement.parentElement.parentElement)">踢出用户</button>
+                            </div>
+                        </div>
+                        <div class="message-content">
+                            ${msg.message_text}
+                        </div>
+                        <div style="color: #666; font-size: 0.9em; margin-top: 10px;">
+                            触发关键词: ${msg.keyword}<br>
+                            时间: ${new Date(msg.created_at).toLocaleString()}
+                        </div>
+                    `;
+                    messageList.appendChild(messageElement);
+                });
+
+                if (data.length === 0) {
+                    messageList.innerHTML = '<p style="text-align: center; color: #666;">暂无消息记录</p>';
+                }
+            })
+            .catch(error => {
+                spinner.style.display = 'none';
+                showNotification('加载消息失败: ' + error, 'error');
+            });
+        }
+
+        // 页面加载时加载消息
+        window.onload = loadMessages;
+    </script>
+</body>
+</html> 
