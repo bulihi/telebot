@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -81,6 +83,15 @@ func (d *Database) createTables() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	// 创建群组表
+	chatSchema := `
+	CREATE TABLE IF NOT EXISTS chats (
+		chat_id INTEGER PRIMARY KEY,
+		title TEXT NOT NULL,
+		type TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
 	// 创建群组设置表
 	groupSettingsSchema := `
 	CREATE TABLE IF NOT EXISTS group_settings (
@@ -99,6 +110,11 @@ func (d *Database) createTables() error {
 	}
 
 	_, err = d.db.Exec(violationSchema)
+	if err != nil {
+		return err
+	}
+
+	_, err = d.db.Exec(chatSchema)
 	if err != nil {
 		return err
 	}
@@ -219,6 +235,125 @@ func (d *Database) UpdateGroupSettings(settings *GroupSettings) error {
 	)
 
 	return err
+}
+
+// 迁移数据库结构
+func (d *Database) Migrate() error {
+	// 1. 检查是否需要添加新的列
+	// keywords 表
+	columns, err := d.getTableColumns("keywords")
+	if err != nil {
+		return err
+	}
+
+	if !containsColumn(columns, "is_active") {
+		_, err = d.db.Exec(`ALTER TABLE keywords ADD COLUMN is_active BOOLEAN DEFAULT 1;`)
+		if err != nil {
+			return err
+		}
+		log.Printf("✅ 已添加 keywords.is_active 列")
+	}
+
+	// 2. 创建新表（如果不存在）
+	// chats 表
+	if !d.tableExists("chats") {
+		chatSchema := `
+		CREATE TABLE chats (
+			chat_id INTEGER PRIMARY KEY,
+			title TEXT NOT NULL,
+			type TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`
+		_, err = d.db.Exec(chatSchema)
+		if err != nil {
+			return err
+		}
+		log.Printf("✅ 已创建 chats 表")
+	}
+
+	// group_settings 表
+	if !d.tableExists("group_settings") {
+		groupSettingsSchema := `
+		CREATE TABLE group_settings (
+			chat_id INTEGER PRIMARY KEY,
+			welcome_message TEXT,
+			verification_enabled BOOLEAN DEFAULT 1,
+			question TEXT,
+			answer TEXT,
+			timeout INTEGER DEFAULT 300,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`
+		_, err = d.db.Exec(groupSettingsSchema)
+		if err != nil {
+			return err
+		}
+		log.Printf("✅ 已创建 group_settings 表")
+	}
+
+	// violations 表
+	if !d.tableExists("violations") {
+		violationSchema := `
+		CREATE TABLE violations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			username TEXT,
+			chat_id INTEGER NOT NULL,
+			message_text TEXT,
+			keyword TEXT NOT NULL,
+			action TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`
+		_, err = d.db.Exec(violationSchema)
+		if err != nil {
+			return err
+		}
+		log.Printf("✅ 已创建 violations 表")
+	}
+
+	log.Printf("✅ 数据库迁移完成")
+	return nil
+}
+
+// 检查表是否存在
+func (d *Database) tableExists(tableName string) bool {
+	var name string
+	err := d.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&name)
+	return err == nil
+}
+
+// 获取表的列信息
+func (d *Database) getTableColumns(tableName string) ([]string, error) {
+	rows, err := d.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var cid int
+		var name string
+		var type_ string
+		var notnull int
+		var dflt_value sql.NullString
+		var pk int
+		err = rows.Scan(&cid, &name, &type_, &notnull, &dflt_value, &pk)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, name)
+	}
+	return columns, nil
+}
+
+// 检查列是否存在
+func containsColumn(columns []string, column string) bool {
+	for _, c := range columns {
+		if c == column {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Database) Close() error {

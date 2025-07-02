@@ -114,8 +114,9 @@ func (tb *TelegramBot) Start() {
 		if update.Message != nil {
 			tb.handleMessage(update.Message)
 		} else if update.ChatMember != nil {
-			// 处理新成员加入
 			tb.handleNewMember(update.ChatMember)
+		} else if update.CallbackQuery != nil {
+			tb.handleCallback(update.CallbackQuery)
 		}
 	}
 }
@@ -301,15 +302,6 @@ func (tb *TelegramBot) handleAdminCommand(message *tgbotapi.Message) bool {
 	switch command {
 	case "start", "help":
 		tb.sendHelp(message.Chat.ID)
-		return true
-	case "add_keyword":
-		tb.handleAddKeyword(message.Chat.ID, args)
-		return true
-	case "list_keywords":
-		tb.handleListKeywords(message.Chat.ID)
-		return true
-	case "delete_keyword":
-		tb.handleDeleteKeyword(message.Chat.ID, args)
 		return true
 	case "violations":
 		tb.handleShowViolations(message.Chat.ID, args)
@@ -667,5 +659,141 @@ func (tb *TelegramBot) kickUser(chatID, userID int64) {
 	_, err := tb.bot.Request(kickConfig)
 	if err != nil {
 		log.Printf("踢出用户失败：%v", err)
+	}
+}
+
+// 处理消息列表命令
+func (tb *TelegramBot) handleListMessages(chatID int64) {
+	// 获取当前最新消息的ID
+	msg := tgbotapi.NewMessage(chatID, "正在获取最近消息...")
+	sentMsg, err := tb.bot.Send(msg)
+	if err != nil {
+		log.Printf("发送消息失败：%v", err)
+		return
+	}
+
+	// 从最新消息开始往前获取50条
+	startID := sentMsg.MessageID - 50
+	if startID < 0 {
+		startID = 0
+	}
+
+	// 删除提示消息
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+	tb.bot.Request(deleteMsg)
+
+	// 发送消息列表
+	for i := startID; i < sentMsg.MessageID; i++ {
+		// 尝试获取消息
+		copyMsg := tgbotapi.NewCopyMessage(chatID, chatID, i)
+		copiedMsg, err := tb.bot.CopyMessage(copyMsg)
+		if err != nil {
+			continue
+		}
+
+		// 获取原始消息
+		fwdMsg := tgbotapi.NewForward(chatID, chatID, i)
+		forwardedMsg, err := tb.bot.Send(fwdMsg)
+		if err != nil {
+			continue
+		}
+
+		// 如果消息有文本内容
+		if forwardedMsg.Text != "" {
+			// 创建操作按钮
+			var keyboard [][]tgbotapi.InlineKeyboardButton
+			muteButton := tgbotapi.NewInlineKeyboardButtonData("禁言用户", fmt.Sprintf("mute_%d", forwardedMsg.From.ID))
+			kickButton := tgbotapi.NewInlineKeyboardButtonData("踢出用户", fmt.Sprintf("kick_%d", forwardedMsg.From.ID))
+			row := []tgbotapi.InlineKeyboardButton{muteButton, kickButton}
+			keyboard = append(keyboard, row)
+
+			// 发送消息和按钮
+			text := fmt.Sprintf("用户: %s (@%s)\n内容: %s",
+				forwardedMsg.From.FirstName, forwardedMsg.From.UserName, forwardedMsg.Text)
+
+			msgConfig := tgbotapi.NewMessage(chatID, text)
+			msgConfig.ReplyMarkup = tgbotapi.InlineKeyboardMarkup{
+				InlineKeyboard: keyboard,
+			}
+			tb.bot.Send(msgConfig)
+
+			// 删除转发的消息
+			deleteMsg := tgbotapi.NewDeleteMessage(chatID, forwardedMsg.MessageID)
+			tb.bot.Request(deleteMsg)
+
+			// 删除复制的消息
+			deleteMsg = tgbotapi.NewDeleteMessage(chatID, copiedMsg.MessageID)
+			tb.bot.Request(deleteMsg)
+
+			// 短暂延迟，避免触发限制
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// 处理按钮回调
+func (tb *TelegramBot) handleCallback(callback *tgbotapi.CallbackQuery) {
+	// 解析回调数据
+	parts := strings.Split(callback.Data, "_")
+	if len(parts) != 2 {
+		return
+	}
+
+	action := parts[0]
+	userID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return
+	}
+
+	// 执行操作
+	switch action {
+	case "mute":
+		// 禁言用户
+		restrictConfig := tgbotapi.RestrictChatMemberConfig{
+			ChatMemberConfig: tgbotapi.ChatMemberConfig{
+				ChatID: callback.Message.Chat.ID,
+				UserID: userID,
+			},
+			UntilDate: time.Now().Add(24 * time.Hour).Unix(), // 禁言24小时
+			Permissions: &tgbotapi.ChatPermissions{
+				CanSendMessages:       false,
+				CanSendMediaMessages:  false,
+				CanSendPolls:          false,
+				CanSendOtherMessages:  false,
+				CanAddWebPagePreviews: false,
+				CanChangeInfo:         false,
+				CanInviteUsers:        false,
+				CanPinMessages:        false,
+			},
+		}
+		tb.bot.Request(restrictConfig)
+
+		// 更新按钮消息
+		text := callback.Message.Text + "\n✅ 已禁言用户"
+		edit := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, text)
+		tb.bot.Send(edit)
+
+		// 发送回调响应
+		callbackCfg := tgbotapi.NewCallback(callback.ID, "已禁言用户")
+		tb.bot.Request(callbackCfg)
+
+	case "kick":
+		// 踢出用户
+		kickConfig := tgbotapi.KickChatMemberConfig{
+			ChatMemberConfig: tgbotapi.ChatMemberConfig{
+				ChatID: callback.Message.Chat.ID,
+				UserID: userID,
+			},
+		}
+		tb.bot.Request(kickConfig)
+
+		// 更新按钮消息
+		text := callback.Message.Text + "\n✅ 已踢出用户"
+		edit := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, text)
+		tb.bot.Send(edit)
+
+		// 发送回调响应
+		callbackCfg := tgbotapi.NewCallback(callback.ID, "已踢出用户")
+		tb.bot.Request(callbackCfg)
 	}
 }

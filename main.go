@@ -84,6 +84,12 @@ func main() {
 	}
 	defer db.Close()
 
+	// 执行数据库迁移
+	log.Println("正在检查数据库结构...")
+	if err := db.Migrate(); err != nil {
+		log.Fatalf("数据库迁移失败：%v", err)
+	}
+
 	// 创建重载通道
 	reloadChan := make(chan struct{}, 1)
 
