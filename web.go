@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 )
@@ -16,9 +18,10 @@ type WebServer struct {
 	db         *Database
 	store      *sessions.CookieStore
 	reloadChan chan struct{} // 添加重载通道
+	bot        *tgbotapi.BotAPI
 }
 
-func NewWebServer(config *Config, db *Database, reloadChan chan struct{}) *WebServer {
+func NewWebServer(config *Config, db *Database, reloadChan chan struct{}, bot *tgbotapi.BotAPI) *WebServer {
 	// 使用配置的密码作为session密钥
 	store := sessions.NewCookieStore([]byte(config.Server.AdminPassword))
 
@@ -36,6 +39,7 @@ func NewWebServer(config *Config, db *Database, reloadChan chan struct{}) *WebSe
 		db:         db,
 		store:      store,
 		reloadChan: reloadChan,
+		bot:        bot,
 	}
 }
 
@@ -60,12 +64,14 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/keywords/{id:[0-9]+}", ws.handleAPIDeleteKeyword).Methods("DELETE")
 	api.HandleFunc("/reload", ws.handleAPIReload).Methods("POST")
 	api.HandleFunc("/group-settings/{chatID}", ws.handleAPIGroupSettings).Methods("GET", "POST")
+	api.HandleFunc("/messages/mute/{userID:[0-9]+}", ws.handleAPIMuteUser).Methods("POST")
+	api.HandleFunc("/messages/kick/{userID:[0-9]+}", ws.handleAPIKickUser).Methods("POST")
 
 	// 页面路由
 	r.HandleFunc("/", ws.authMiddleware(ws.handleDashboard))
 	r.HandleFunc("/keywords", ws.authMiddleware(ws.handleKeywords))
 	r.HandleFunc("/violations", ws.authMiddleware(ws.handleViolations))
-	r.HandleFunc("/group-settings", ws.authMiddleware(ws.handleGroupSettingsPage))
+	r.HandleFunc("/messages", ws.authMiddleware(ws.handleMessages))
 
 	return http.ListenAndServe(ws.config.Server.Port, r)
 }
@@ -724,4 +730,95 @@ func (ws *WebServer) handleAPIKeywords(w http.ResponseWriter, r *http.Request) {
 
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	}
+}
+
+// 处理消息列表页面
+func (ws *WebServer) handleMessages(w http.ResponseWriter, r *http.Request) {
+	tmpl, err := template.ParseFiles("templates/messages.html")
+	if err != nil {
+		http.Error(w, "模板加载失败", http.StatusInternalServerError)
+		return
+	}
+	tmpl.Execute(w, nil)
+}
+
+// 处理禁言用户的API
+func (ws *WebServer) handleAPIMuteUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID, err := strconv.ParseInt(vars["userID"], 10, 64)
+	if err != nil {
+		http.Error(w, "无效的用户ID", http.StatusBadRequest)
+		return
+	}
+
+	// 获取群组ID（从请求参数或session中）
+	chatID := ws.config.Telegram.AdminUserID // 临时使用管理员的chat ID
+
+	// 执行禁言操作
+	restrictConfig := tgbotapi.RestrictChatMemberConfig{
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{
+			ChatID: chatID,
+			UserID: userID,
+		},
+		UntilDate: time.Now().Add(24 * time.Hour).Unix(), // 禁言24小时
+		Permissions: &tgbotapi.ChatPermissions{
+			CanSendMessages:       false,
+			CanSendMediaMessages:  false,
+			CanSendPolls:          false,
+			CanSendOtherMessages:  false,
+			CanAddWebPagePreviews: false,
+			CanChangeInfo:         false,
+			CanInviteUsers:        false,
+			CanPinMessages:        false,
+		},
+	}
+
+	_, err = ws.bot.Request(restrictConfig)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "用户已被禁言",
+	})
+}
+
+// 处理踢出用户的API
+func (ws *WebServer) handleAPIKickUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID, err := strconv.ParseInt(vars["userID"], 10, 64)
+	if err != nil {
+		http.Error(w, "无效的用户ID", http.StatusBadRequest)
+		return
+	}
+
+	// 获取群组ID（从请求参数或session中）
+	chatID := ws.config.Telegram.AdminUserID // 临时使用管理员的chat ID
+
+	// 执行踢出操作
+	kickConfig := tgbotapi.KickChatMemberConfig{
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{
+			ChatID: chatID,
+			UserID: userID,
+		},
+	}
+
+	_, err = ws.bot.Request(kickConfig)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "用户已被踢出",
+	})
 }

@@ -101,7 +101,7 @@ func main() {
 
 	// 启动Web管理界面
 	go func() {
-		webServer := NewWebServer(config, db, reloadChan)
+		webServer := NewWebServer(config, db, reloadChan, bot.bot)
 		log.Printf("Web管理界面启动在端口 %s", config.Server.Port)
 		err := webServer.Start()
 		if err != nil {
