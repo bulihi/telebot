@@ -210,6 +210,60 @@ func (tb *TelegramBot) handleNewMember(chatMember *tgbotapi.ChatMemberUpdated) {
 }
 
 func (tb *TelegramBot) handleMessage(message *tgbotapi.Message) {
+	// 记录消息
+	if message.Chat.IsGroup() || message.Chat.IsSuperGroup() {
+		// 记录群组信息
+		chat := &Chat{
+			ChatID: message.Chat.ID,
+			Title:  message.Chat.Title,
+			Type:   message.Chat.Type,
+		}
+		if err := tb.db.UpsertChat(chat); err != nil {
+			log.Printf("记录群组信息失败：%v", err)
+		}
+
+		// 记录消息
+		msg := &Message{
+			Timestamp:      time.Unix(int64(message.Date), 0),
+			ChatID:         message.Chat.ID,
+			ChatTitle:      message.Chat.Title,
+			UserName:       message.From.UserName,
+			FromUserID:     message.From.ID,
+			MessageType:    "text",
+			MessageContent: message.Text,
+		}
+
+		// 根据消息类型设置相应的字段
+		if message.Photo != nil && len(message.Photo) > 0 {
+			msg.MessageType = "photo"
+			msg.MessageContent = message.Caption
+			msg.FilePath = message.Photo[len(message.Photo)-1].FileID
+		} else if message.Document != nil {
+			msg.MessageType = "document"
+			msg.MessageContent = message.Caption
+			msg.FilePath = message.Document.FileID
+		} else if message.Video != nil {
+			msg.MessageType = "video"
+			msg.MessageContent = message.Caption
+			msg.FilePath = message.Video.FileID
+		} else if message.Audio != nil {
+			msg.MessageType = "audio"
+			msg.MessageContent = message.Caption
+			msg.FilePath = message.Audio.FileID
+		} else if message.Voice != nil {
+			msg.MessageType = "voice"
+			msg.MessageContent = message.Caption
+			msg.FilePath = message.Voice.FileID
+		} else if message.Sticker != nil {
+			msg.MessageType = "sticker"
+			msg.FilePath = message.Sticker.FileID
+		}
+
+		if err := tb.db.LogMessage(msg); err != nil {
+			log.Printf("记录消息失败：%v", err)
+		}
+	}
+
 	// 检查是否是验证回答
 	if status, exists := tb.verificationStatus[message.Chat.ID][message.From.ID]; exists {
 		settings, _ := tb.db.GetGroupSettings(message.Chat.ID)
@@ -279,7 +333,31 @@ func (tb *TelegramBot) handleMessage(message *tgbotapi.Message) {
 	}
 
 	// 检查消息内容
-	tb.checkMessageContent(message)
+	if message.Text != "" {
+		result := tb.filter.CheckMessage(message.Text)
+		if result.IsViolation {
+			tb.handleViolation(message, result, message.Text)
+			return
+		}
+	}
+
+	// 检查回复的消息
+	if message.ReplyToMessage != nil && message.ReplyToMessage.Text != "" {
+		result := tb.filter.CheckMessage(message.ReplyToMessage.Text)
+		if result.IsViolation {
+			tb.handleViolation(message.ReplyToMessage, result, message.ReplyToMessage.Text)
+			return
+		}
+	}
+
+	// 检查转发的消息
+	if message.ForwardFrom != nil && message.Text != "" {
+		result := tb.filter.CheckMessage(message.Text)
+		if result.IsViolation {
+			tb.handleViolation(message, result, message.Text)
+			return
+		}
+	}
 }
 
 func (tb *TelegramBot) handlePrivateMessage(message *tgbotapi.Message) {
@@ -527,46 +605,6 @@ func (tb *TelegramBot) reloadKeywords() error {
 
 	tb.filter.UpdateKeywords(keywords)
 	return nil
-}
-
-func (tb *TelegramBot) checkMessageContent(message *tgbotapi.Message) {
-	var textToCheck string
-	var fileName string
-
-	// 获取要检查的文本
-	if message.Text != "" {
-		textToCheck = message.Text
-	} else if message.Caption != "" {
-		textToCheck = message.Caption
-	}
-
-	// 获取文件名（如果有）
-	if message.Photo != nil && len(message.Photo) > 0 {
-		// 图片通常没有文件名，但检查caption
-		fileName = "image"
-	} else if message.Document != nil {
-		fileName = message.Document.FileName
-	} else if message.Video != nil {
-		fileName = message.Video.FileName
-	} else if message.Animation != nil {
-		fileName = message.Animation.FileName
-	}
-
-	// 检查文本内容
-	var result *FilterResult
-	if textToCheck != "" {
-		result = tb.filter.CheckMessage(textToCheck)
-	}
-
-	// 如果文本没有违规，检查文件名
-	if (result == nil || !result.IsViolation) && fileName != "" {
-		result = tb.filter.CheckFileName(fileName)
-	}
-
-	// 处理违规
-	if result != nil && result.IsViolation {
-		tb.handleViolation(message, result, textToCheck)
-	}
 }
 
 func (tb *TelegramBot) handleViolation(message *tgbotapi.Message, result *FilterResult, messageText string) {

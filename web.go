@@ -66,7 +66,7 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/group-settings/{chatID}", ws.handleAPIGroupSettings).Methods("GET", "POST")
 	api.HandleFunc("/messages/mute/{userID:[0-9]+}", ws.handleAPIMuteUser).Methods("POST")
 	api.HandleFunc("/messages/kick/{userID:[0-9]+}", ws.handleAPIKickUser).Methods("POST")
-	api.HandleFunc("/violations", ws.handleAPIViolations).Methods("GET")
+	api.HandleFunc("/messages", ws.handleAPIMessages).Methods("GET")
 
 	// 页面路由
 	r.HandleFunc("/", ws.authMiddleware(ws.handleDashboard))
@@ -560,178 +560,70 @@ func (ws *WebServer) handleViolations(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, struct{ Violations []Violation }{Violations: violations})
 }
 
-func (ws *WebServer) handleGroupSettingsPage(w http.ResponseWriter, r *http.Request) {
-	tmpl := `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>群组设置 - Telegram Bot</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .nav { margin-bottom: 20px; }
-        .nav a { margin-right: 20px; text-decoration: none; color: #007bff; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; }
-        .form-group input, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .form-group textarea { height: 150px; }
-        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-        .btn:hover { background: #0056b3; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>群组设置</h1>
-        
-        <div class="nav">
-            <a href="/">仪表板</a>
-            <a href="/keywords">关键词管理</a>
-            <a href="/violations">违规记录</a>
-            <a href="/group-settings">群组设置</a>
-        </div>
+func (ws *WebServer) handleAPIMessages(w http.ResponseWriter, r *http.Request) {
+	// 设置响应头
+	w.Header().Set("Content-Type", "application/json")
 
-        <div id="settings-form">
-            <div class="form-group">
-                <label>群组ID:</label>
-                <input type="number" id="chatID" required>
-            </div>
-            <div class="form-group">
-                <label>欢迎消息:</label>
-                <textarea id="welcomeMessage"></textarea>
-            </div>
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" id="verificationEnabled">
-                    启用验证
-                </label>
-            </div>
-            <div class="form-group">
-                <label>验证问题:</label>
-                <input type="text" id="question">
-            </div>
-            <div class="form-group">
-                <label>正确答案:</label>
-                <input type="text" id="answer">
-            </div>
-            <div class="form-group">
-                <label>超时时间(秒):</label>
-                <input type="number" id="timeout" value="300">
-            </div>
-            <button class="btn" onclick="saveSettings()">保存设置</button>
-        </div>
-    </div>
-
-    <script>
-        function loadSettings(chatID) {
-            fetch('/api/group-settings/' + chatID)
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('welcomeMessage').value = data.welcome_message || '';
-                    document.getElementById('verificationEnabled').checked = data.verification_enabled;
-                    document.getElementById('question').value = data.question || '';
-                    document.getElementById('answer').value = data.answer || '';
-                    document.getElementById('timeout').value = data.timeout || 300;
-                });
-        }
-
-        function saveSettings() {
-            const chatID = document.getElementById('chatID').value;
-            const data = {
-                welcome_message: document.getElementById('welcomeMessage').value,
-                verification_enabled: document.getElementById('verificationEnabled').checked,
-                question: document.getElementById('question').value,
-                answer: document.getElementById('answer').value,
-                timeout: parseInt(document.getElementById('timeout').value)
-            };
-
-            fetch('/api/group-settings/' + chatID, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('设置已保存');
-                } else {
-                    alert('保存失败: ' + data.error);
-                }
-            });
-        }
-
-        // 当输入群组ID时加载设置
-        document.getElementById('chatID').addEventListener('change', function() {
-            loadSettings(this.value);
-        });
-    </script>
-</body>
-</html>`
-
-	t := template.Must(template.New("group-settings").Parse(tmpl))
-	t.Execute(w, nil)
-}
-
-func (ws *WebServer) handleAPIDeleteKeyword(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	// 获取查询参数
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	perPage, err := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if err != nil || perPage < 1 || perPage > 100 {
+		perPage = 50
+	}
+	chatID, err := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	if err != nil {
-		http.Error(w, "无效的ID", http.StatusBadRequest)
-		return
+		chatID = 0 // 0表示所有群组
+	}
+	messageType := r.URL.Query().Get("message_type")
+	if messageType == "" {
+		messageType = "all"
 	}
 
-	err = ws.db.DeleteKeyword(id)
+	// 获取消息列表
+	messages, total, err := ws.db.GetMessages(chatID, page, perPage, messageType)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("获取消息列表失败: %v", err)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "获取消息列表失败: " + err.Error(),
+		})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	// 计算总页数
+	totalPages := (total + perPage - 1) / perPage
+
+	// 返回结果
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"messages":    messages,
+		"total":       total,
+		"page":        page,
+		"per_page":    perPage,
+		"total_pages": totalPages,
+		"filters": map[string]interface{}{
+			"chat_id":      chatID,
+			"message_type": messageType,
+		},
+	})
 }
 
-func (ws *WebServer) handleAPIKeywords(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		keywords, err := ws.db.GetKeywords()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(keywords)
-		return
-	}
-
-	if r.Method == "POST" {
-		var keyword struct {
-			Keyword   string `json:"keyword"`
-			MatchType string `json:"match_type"`
-			Action    string `json:"action"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&keyword); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		err := ws.db.AddKeyword(keyword.Keyword, keyword.MatchType, keyword.Action)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
-	}
-}
-
-// 处理消息列表页面
+// 修改消息列表页面模板
 func (ws *WebServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFiles("templates/messages.html")
+	// 获取所有群组列表供选择
+	chats, err := ws.db.GetAllChats()
 	if err != nil {
-		http.Error(w, "模板加载失败", http.StatusInternalServerError)
+		http.Error(w, "获取群组列表失败", http.StatusInternalServerError)
 		return
 	}
-	tmpl.Execute(w, nil)
+
+	tmpl := template.Must(template.ParseFiles("templates/messages.html"))
+	tmpl.Execute(w, map[string]interface{}{
+		"Chats": chats,
+	})
 }
 
 // 处理禁言用户的API
@@ -815,13 +707,52 @@ func (ws *WebServer) handleAPIKickUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (ws *WebServer) handleAPIViolations(w http.ResponseWriter, r *http.Request) {
-	violations, err := ws.db.GetViolations(50)
+func (ws *WebServer) handleAPIDeleteKeyword(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "无效的ID", http.StatusBadRequest)
+		return
+	}
+
+	err = ws.db.DeleteKeyword(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(violations)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (ws *WebServer) handleAPIKeywords(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		keywords, err := ws.db.GetKeywords()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(keywords)
+		return
+	}
+
+	if r.Method == "POST" {
+		var keyword struct {
+			Keyword   string `json:"keyword"`
+			MatchType string `json:"match_type"`
+			Action    string `json:"action"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&keyword); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		err := ws.db.AddKeyword(keyword.Keyword, keyword.MatchType, keyword.Action)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	}
 }

@@ -43,6 +43,18 @@ type GroupSettings struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+type Message struct {
+	ID             int64     `json:"id"`
+	Timestamp      time.Time `json:"timestamp"`
+	ChatID         int64     `json:"chat_id"`
+	ChatTitle      string    `json:"chat_title"`
+	UserName       string    `json:"user_name"`
+	FromUserID     int64     `json:"from_user_id"`
+	MessageType    string    `json:"message_type"`
+	MessageContent string    `json:"message_content"`
+	FilePath       string    `json:"file_path,omitempty"`
+}
+
 func NewDatabase(dbPath string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -104,6 +116,22 @@ func (d *Database) createTables() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	// 创建消息表
+	messageSchema := `
+	CREATE TABLE IF NOT EXISTS messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		chat_id INTEGER NOT NULL,
+		chat_title TEXT NOT NULL,
+		user_name TEXT NOT NULL,
+		from_user_id INTEGER NOT NULL,
+		message_type TEXT NOT NULL,
+		message_content TEXT,
+		file_path TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+	CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);`
+
 	_, err := d.db.Exec(keywordSchema)
 	if err != nil {
 		return err
@@ -120,6 +148,11 @@ func (d *Database) createTables() error {
 	}
 
 	_, err = d.db.Exec(groupSettingsSchema)
+	if err != nil {
+		return err
+	}
+
+	_, err = d.db.Exec(messageSchema)
 	if err != nil {
 		return err
 	}
@@ -235,6 +268,120 @@ func (d *Database) UpdateGroupSettings(settings *GroupSettings) error {
 	)
 
 	return err
+}
+
+// 添加消息记录
+func (d *Database) LogMessage(msg *Message) error {
+	query := `INSERT INTO messages (
+		timestamp, chat_id, chat_title, user_name, from_user_id,
+		message_type, message_content, file_path
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+	_, err := d.db.Exec(query,
+		msg.Timestamp,
+		msg.ChatID,
+		msg.ChatTitle,
+		msg.UserName,
+		msg.FromUserID,
+		msg.MessageType,
+		msg.MessageContent,
+		msg.FilePath,
+	)
+	return err
+}
+
+// 获取消息列表
+func (d *Database) GetMessages(chatID int64, page, perPage int, messageType string) ([]Message, int, error) {
+	// 构建基础查询
+	baseQuery := `SELECT id, timestamp, chat_id, chat_title, user_name, 
+		from_user_id, message_type, message_content, file_path 
+		FROM messages WHERE 1=1`
+	countQuery := `SELECT COUNT(*) FROM messages WHERE 1=1`
+	var params []interface{}
+
+	// 添加过滤条件
+	if chatID != 0 {
+		baseQuery += ` AND chat_id = ?`
+		countQuery += ` AND chat_id = ?`
+		params = append(params, chatID)
+	}
+	if messageType != "all" {
+		baseQuery += ` AND message_type = ?`
+		countQuery += ` AND message_type = ?`
+		params = append(params, messageType)
+	}
+
+	// 获取总数
+	var total int
+	err := d.db.QueryRow(countQuery, params...).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 添加排序和分页
+	baseQuery += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+	offset := (page - 1) * perPage
+	params = append(params, perPage, offset)
+
+	// 执行主查询
+	rows, err := d.db.Query(baseQuery, params...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		err := rows.Scan(
+			&msg.ID,
+			&msg.Timestamp,
+			&msg.ChatID,
+			&msg.ChatTitle,
+			&msg.UserName,
+			&msg.FromUserID,
+			&msg.MessageType,
+			&msg.MessageContent,
+			&msg.FilePath,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, total, nil
+}
+
+// 获取所有群组列表
+func (d *Database) GetAllChats() ([]struct {
+	ChatID int64  `json:"chat_id"`
+	Title  string `json:"title"`
+}, error) {
+	query := `SELECT DISTINCT chat_id, chat_title FROM messages ORDER BY chat_title`
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chats []struct {
+		ChatID int64  `json:"chat_id"`
+		Title  string `json:"title"`
+	}
+
+	for rows.Next() {
+		var chat struct {
+			ChatID int64  `json:"chat_id"`
+			Title  string `json:"title"`
+		}
+		if err := rows.Scan(&chat.ChatID, &chat.Title); err != nil {
+			return nil, err
+		}
+		chats = append(chats, chat)
+	}
+
+	return chats, nil
 }
 
 // 迁移数据库结构

@@ -9,6 +9,28 @@
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .nav { margin-bottom: 20px; }
         .nav a { margin-right: 20px; text-decoration: none; color: #007bff; }
+        .filters { 
+            background: #f8f9fa; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 200px;
+        }
+        select, input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-width: 150px;
+        }
         .message-list { margin-top: 20px; }
         .message-card {
             background: #f8f9fa;
@@ -16,25 +38,78 @@
             margin-bottom: 15px;
             border-radius: 8px;
             border: 1px solid #dee2e6;
+            transition: all 0.3s ease;
+        }
+        .message-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .message-header {
             display: flex;
             justify-content: space-between;
             margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
-        .user-info { font-weight: bold; }
-        .message-actions { display: flex; gap: 10px; }
+        .user-info { 
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #495057;
+        }
+        .message-actions { 
+            display: flex; 
+            gap: 10px;
+            flex-wrap: wrap;
+        }
         .btn {
             padding: 5px 15px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
             color: white;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s ease;
         }
         .btn-warning { background-color: #ffc107; }
         .btn-danger { background-color: #dc3545; }
-        .btn:hover { opacity: 0.9; }
-        .message-content { margin-top: 10px; }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .message-content { 
+            margin-top: 10px;
+            word-break: break-word;
+            line-height: 1.5;
+        }
+        .message-footer {
+            margin-top: 10px;
+            color: #6c757d;
+            font-size: 0.9em;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .message-meta {
+            display: flex;
+            gap: 15px;
+        }
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
         .notification {
             position: fixed;
             top: 20px;
@@ -44,6 +119,11 @@
             color: white;
             display: none;
             z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
         }
         .notification.success { background-color: #28a745; }
         .notification.error { background-color: #dc3545; }
@@ -65,6 +145,62 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        .pagination button {
+            padding: 5px 15px;
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            background: white;
+            color: #007bff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .pagination button:hover:not(:disabled) {
+            background: #007bff;
+            color: white;
+        }
+        .pagination button.active {
+            background: #007bff;
+            color: white;
+        }
+        .pagination button:disabled {
+            border-color: #ccc;
+            color: #ccc;
+            cursor: not-allowed;
+        }
+        .file-preview {
+            max-width: 300px;
+            max-height: 200px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .file-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #007bff;
+            text-decoration: none;
+            margin-top: 10px;
+        }
+        .file-link:hover {
+            text-decoration: underline;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6c757d;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
@@ -78,6 +214,31 @@
             <a href="/messages">消息列表</a>
         </div>
 
+        <div class="filters">
+            <div class="filter-group">
+                <label>群组：</label>
+                <select id="chatSelect" onchange="loadMessages(1)">
+                    <option value="all">所有群组</option>
+                    {{range .Chats}}
+                    <option value="{{.ChatID}}">{{.Title}}</option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>消息类型：</label>
+                <select id="messageType" onchange="loadMessages(1)">
+                    <option value="all">所有类型</option>
+                    <option value="text">文本</option>
+                    <option value="photo">图片</option>
+                    <option value="document">文件</option>
+                    <option value="video">视频</option>
+                    <option value="audio">音频</option>
+                    <option value="voice">语音</option>
+                    <option value="sticker">贴纸</option>
+                </select>
+            </div>
+        </div>
+
         <div id="loadingSpinner">
             <div class="loading"></div>
             <p>正在加载消息...</p>
@@ -86,11 +247,18 @@
         <div id="messageList" class="message-list">
             <!-- 消息将通过JavaScript动态加载 -->
         </div>
+
+        <div id="pagination" class="pagination">
+            <!-- 分页按钮将通过JavaScript动态生成 -->
+        </div>
     </div>
 
     <div id="notification" class="notification"></div>
 
     <script>
+        let currentPage = 1;
+        const perPage = 50;
+
         function showNotification(message, type) {
             const notification = document.getElementById('notification');
             notification.textContent = message;
@@ -101,7 +269,35 @@
             }, 3000);
         }
 
+        function getInitials(name) {
+            return name.split(' ')
+                .map(word => word[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2);
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) { // 小于1分钟
+                return '刚刚';
+            } else if (diff < 3600000) { // 小于1小时
+                return Math.floor(diff / 60000) + '分钟前';
+            } else if (diff < 86400000) { // 小于1天
+                return Math.floor(diff / 3600000) + '小时前';
+            } else if (date.getFullYear() === now.getFullYear()) { // 同年
+                return `${date.getMonth() + 1}月${date.getDate()}日 ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+            } else {
+                return date.toLocaleString();
+            }
+        }
+
         function muteUser(userId, messageElement) {
+            if (!confirm('确定要禁言该用户吗？')) return;
+            
             fetch('/api/messages/mute/' + userId, {
                 method: 'POST'
             })
@@ -120,6 +316,8 @@
         }
 
         function kickUser(userId, messageElement) {
+            if (!confirm('确定要踢出该用户吗？')) return;
+            
             fetch('/api/messages/kick/' + userId, {
                 method: 'POST'
             })
@@ -137,46 +335,142 @@
             });
         }
 
-        function loadMessages() {
+        function createPagination(currentPage, totalPages) {
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+
+            // 上一页按钮
+            const prevButton = document.createElement('button');
+            prevButton.textContent = '上一页';
+            prevButton.disabled = currentPage === 1;
+            prevButton.onclick = () => loadMessages(currentPage - 1);
+            pagination.appendChild(prevButton);
+
+            // 页码按钮
+            for (let i = 1; i <= totalPages; i++) {
+                if (
+                    i === 1 || // 第一页
+                    i === totalPages || // 最后一页
+                    (i >= currentPage - 2 && i <= currentPage + 2) // 当前页附近的页码
+                ) {
+                    const pageButton = document.createElement('button');
+                    pageButton.textContent = i;
+                    pageButton.className = i === currentPage ? 'active' : '';
+                    pageButton.onclick = () => loadMessages(i);
+                    pagination.appendChild(pageButton);
+                } else if (
+                    i === currentPage - 3 || // 当前页前的省略号
+                    i === currentPage + 3 // 当前页后的省略号
+                ) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.textContent = '...';
+                    pagination.appendChild(ellipsis);
+                }
+            }
+
+            // 下一页按钮
+            const nextButton = document.createElement('button');
+            nextButton.textContent = '下一页';
+            nextButton.disabled = currentPage === totalPages;
+            nextButton.onclick = () => loadMessages(currentPage + 1);
+            pagination.appendChild(nextButton);
+        }
+
+        function loadMessages(page = 1) {
             const spinner = document.getElementById('loadingSpinner');
             const messageList = document.getElementById('messageList');
+            const chatId = document.getElementById('chatSelect').value;
+            const messageType = document.getElementById('messageType').value;
             
+            currentPage = page;
             spinner.style.display = 'block';
             messageList.innerHTML = '';
 
-            // 从violations表获取最近的消息
-            fetch('/api/violations')
+            const params = new URLSearchParams({
+                page: page,
+                per_page: perPage,
+                message_type: messageType,
+            });
+            if (chatId !== 'all') {
+                params.append('chat_id', chatId);
+            }
+
+            fetch('/api/messages?' + params.toString())
             .then(response => response.json())
             .then(data => {
                 spinner.style.display = 'none';
                 
-                data.forEach(msg => {
+                if (!data.success) {
+                    showNotification(data.error || '加载消息失败', 'error');
+                    return;
+                }
+
+                if (data.messages.length === 0) {
+                    messageList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <p>暂无消息记录</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                data.messages.forEach(msg => {
                     const messageElement = document.createElement('div');
                     messageElement.className = 'message-card';
+                    
+                    // 处理文件预览
+                    let filePreview = '';
+                    if (msg.file_path) {
+                        if (msg.message_type === 'photo' || msg.message_type === 'sticker') {
+                            filePreview = `<img src="${msg.file_path}" class="file-preview" alt="图片">`;
+                        } else {
+                            filePreview = `
+                                <a href="${msg.file_path}" target="_blank" class="file-link">
+                                    📎 查看${msg.message_type === 'video' ? '视频' : 
+                                           msg.message_type === 'audio' ? '音频' : 
+                                           msg.message_type === 'voice' ? '语音' : '文件'}
+                                </a>
+                            `;
+                        }
+                    }
+
                     messageElement.innerHTML = `
                         <div class="message-header">
                             <div class="user-info">
-                                ${msg.username} (ID: ${msg.user_id})
+                                <div class="user-avatar">${getInitials(msg.user_name)}</div>
+                                <div>
+                                    <div>${msg.user_name}</div>
+                                    <small style="color: #6c757d;">ID: ${msg.from_user_id}</small>
+                                </div>
                             </div>
                             <div class="message-actions">
-                                <button class="btn btn-warning" onclick="muteUser(${msg.user_id}, this.parentElement.parentElement.parentElement)">禁言用户</button>
-                                <button class="btn btn-danger" onclick="kickUser(${msg.user_id}, this.parentElement.parentElement.parentElement)">踢出用户</button>
+                                <button class="btn btn-warning" onclick="muteUser(${msg.from_user_id}, this.closest('.message-card'))">
+                                    🔇 禁言用户
+                                </button>
+                                <button class="btn btn-danger" onclick="kickUser(${msg.from_user_id}, this.closest('.message-card'))">
+                                    ⛔ 踢出用户
+                                </button>
                             </div>
                         </div>
                         <div class="message-content">
-                            ${msg.message_text}
+                            ${msg.message_content || ''}
+                            ${filePreview}
                         </div>
-                        <div style="color: #666; font-size: 0.9em; margin-top: 10px;">
-                            触发关键词: ${msg.keyword}<br>
-                            时间: ${new Date(msg.created_at).toLocaleString()}
+                        <div class="message-footer">
+                            <div class="message-meta">
+                                <span class="meta-item">📱 ${msg.message_type}</span>
+                                <span class="meta-item">👥 ${msg.chat_title}</span>
+                            </div>
+                            <div class="meta-item">
+                                🕒 ${formatTimestamp(msg.timestamp)}
+                            </div>
                         </div>
                     `;
                     messageList.appendChild(messageElement);
                 });
 
-                if (data.length === 0) {
-                    messageList.innerHTML = '<p style="text-align: center; color: #666;">暂无消息记录</p>';
-                }
+                createPagination(data.page, data.total_pages);
             })
             .catch(error => {
                 spinner.style.display = 'none';
@@ -185,7 +479,7 @@
         }
 
         // 页面加载时加载消息
-        window.onload = loadMessages;
+        window.onload = () => loadMessages(1);
     </script>
 </body>
 </html> 
